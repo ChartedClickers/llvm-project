@@ -1,0 +1,52 @@
+name: Release Binaries
+
+on: push
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout main repository
+        uses: actions/checkout@main
+
+      - name: Setup environment variables
+        run: |
+          $_ver = "v18.1.3-file-macro-$(git rev-parse --short=8 HEAD)"
+          echo "commit_ver=$_ver" >> "$Env:GITHUB_ENV"
+
+      - name: Install ninja
+        run: choco install ninja
+
+      - name: Build
+        run: |
+          echo "Setup VS Environment Variables"
+          $installationPath = vswhere.exe -prerelease -latest -property installationPath
+          if ($installationPath -and (test-path "$installationPath\Common7\Tools\vsdevcmd.bat"))
+          {
+              & "${env:COMSPEC}" /s /c "`"$installationPath\Common7\Tools\vsdevcmd.bat`" -no_logo && set" | foreach-object {
+                  $name, $value = $_ -split '=', 2
+                  set-content env:\"$name" $value
+              }
+          }
+          mkdir build
+          cmake -GNinja -S llvm -B build -DLLVM_ENABLE_PROJECTS="clang;compiler-rt" -DCMAKE_BUILD_TYPE=Release -DLLVM_TARGETS_TO_BUILD=X86
+          cd build
+          ninja
+
+      - name: Zip
+        run: 7z a -t7z -mx=9 -m0=LZMA2 bin.7z build/bin
+
+      - name: Upload Artifacs
+        if: false
+        uses: actions/upload-artifact@main
+        with:
+          name: bin
+          path: bin.7z
+
+      - name: Upload release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create ${{ env.commit_ver }} bin.7z build/bin/clang-cl.exe --target ${{ GITHUB.SHA }} -t "${{ env.commit_ver }}" 
+
